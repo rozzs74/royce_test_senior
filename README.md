@@ -70,10 +70,6 @@ The system applies discounts based on the following criteria:
 
 2. **Configure `environments/.env.dev`**:
    ```env
-   # Supabase Configuration
-   SUPABASE_URL=your_supabase_project_url
-   SUPABASE_KEY=your_supabase_anon_key
-   
    # Google AI Configuration
    GOOGLE_API_KEY=your_google_ai_api_key
    
