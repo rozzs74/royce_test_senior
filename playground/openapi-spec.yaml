@@ -1,0 +1,795 @@
+openapi: 3.0.3
+info:
+  title: Bowling Shoes Rental Service API
+  description: |
+    A FastAPI-based backend service for managing bowling shoe rentals with LLM-powered discount calculations.
+    
+    ## Features
+    - Customer management with personal information tracking
+    - Rental management with automatic discount calculation
+    - LLM integration for intelligent discount determination
+    - Comprehensive input validation using Pydantic
+    - Real-time discount calculation based on age, disability, and medical conditions
+    
+    ## Discount Model
+    The system applies discounts based on the following criteria:
+    - **Age 0-12**: 20% discount
+    - **Age 13-18**: 10% discount
+    - **Age 65+**: 15% discount
+    - **Disabled**: 25% discount
+    - **Medical conditions** (diabetes, hypertension, chronic condition): 10% each
+    
+    **Note**: Only the highest applicable discount is applied.
+    
+  version: 1.0.0
+  contact:
+    name: Bowling Shoes Rental Service
+    email: dev@kodeacross.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://example.com/terms
+
+servers:
+  - url: https://bowling-shoes-rental-gateway-{project-id}.a.run.app
+    description: Production API Gateway
+    variables:
+      project-id:
+        default: your-project-id
+        description: Your GCP Project ID
+  - url: https://bowling-shoes-rental-us-central1-{project-id}.a.run.app
+    description: Direct Cloud Run Service
+    variables:
+      project-id:
+        default: your-project-id
+        description: Your GCP Project ID
+  - url: http://localhost:8000
+    description: Local development server
+
+# API Gateway specific configuration
+x-google-backend:
+  address: https://bowling-shoes-rental-us-central1-{project-id}.a.run.app
+  protocol: h2
+
+# Rate limiting and quota configuration
+x-google-quota:
+  metricCosts:
+    read-requests: 1
+    write-requests: 2
+    discount-calculations: 5
+
+# Authentication configuration
+x-google-endpoints:
+  - name: bowling-shoes-rental-gateway-{project-id}.a.run.app
+    allowCors: true
+
+security:
+  - api_key: []
+  - oauth2: [read, write]
+
+paths:
+  /:
+    get:
+      summary: Get service information
+      description: Returns basic information about the Bowling Shoes Rental Service
+      operationId: getServiceInfo
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    example: "Bowling Shoes Rental Service"
+                  version:
+                    type: string
+                    example: "1.0.0"
+                  description:
+                    type: string
+                    example: "FastAPI service with LLM integration for discount calculations"
+      x-google-quota:
+        metricCosts:
+          read-requests: 1
+
+  /health:
+    get:
+      summary: Health check
+      description: Returns the health status of the service
+      operationId: healthCheck
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          read-requests: 1
+
+  /customers:
+    get:
+      summary: Get all customers
+      description: Retrieve a list of all customers
+      operationId: getCustomers
+      tags:
+        - Customers
+      security:
+        - api_key: []
+      responses:
+        '200':
+          description: List of customers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CustomerResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          read-requests: 1
+
+    post:
+      summary: Create a new customer
+      description: Create a new customer with personal information
+      operationId: createCustomer
+      tags:
+        - Customers
+      security:
+        - api_key: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreate'
+            examples:
+              basic_customer:
+                summary: Basic customer
+                value:
+                  name: "John Doe"
+                  age: 25
+                  contact_info: "john.doe@example.com"
+                  is_disabled: false
+                  medical_conditions: null
+              senior_disabled_customer:
+                summary: Senior disabled customer with medical conditions
+                value:
+                  name: "Jane Smith"
+                  age: 70
+                  contact_info: "jane.smith@example.com"
+                  is_disabled: true
+                  medical_conditions: ["diabetes", "hypertension"]
+      responses:
+        '201':
+          description: Customer created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          write-requests: 2
+
+  /customers/{customer_id}:
+    get:
+      summary: Get customer by ID
+      description: Retrieve a specific customer by their ID
+      operationId: getCustomer
+      tags:
+        - Customers
+      security:
+        - api_key: []
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          description: The ID of the customer to retrieve
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+      responses:
+        '200':
+          description: Customer details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerResponse'
+        '404':
+          description: Customer not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          read-requests: 1
+
+  /customers/{customer_id}/rentals:
+    get:
+      summary: Get customer rentals
+      description: Retrieve all rentals for a specific customer
+      operationId: getCustomerRentals
+      tags:
+        - Customers
+        - Rentals
+      security:
+        - api_key: []
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          description: The ID of the customer
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+      responses:
+        '200':
+          description: List of customer rentals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RentalResponse'
+        '404':
+          description: Customer not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          read-requests: 1
+
+  /rentals:
+    get:
+      summary: Get all rentals
+      description: Retrieve a list of all rentals
+      operationId: getRentals
+      tags:
+        - Rentals
+      security:
+        - api_key: []
+      responses:
+        '200':
+          description: List of rentals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RentalResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          read-requests: 1
+
+    post:
+      summary: Create a new rental
+      description: Create a new rental with automatic discount calculation
+      operationId: createRental
+      tags:
+        - Rentals
+      security:
+        - api_key: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RentalCreate'
+            examples:
+              basic_rental:
+                summary: Basic rental
+                value:
+                  customer_id: 1
+                  shoe_size: 10.5
+                  rental_fee: 25.00
+              large_rental:
+                summary: Large shoe rental
+                value:
+                  customer_id: 2
+                  shoe_size: 13.0
+                  rental_fee: 30.00
+      responses:
+        '201':
+          description: Rental created successfully with discount applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RentalResponse'
+        '404':
+          description: Customer not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          write-requests: 2
+
+  /rentals/{rental_id}:
+    get:
+      summary: Get rental by ID
+      description: Retrieve a specific rental by its ID
+      operationId: getRental
+      tags:
+        - Rentals
+      security:
+        - api_key: []
+      parameters:
+        - name: rental_id
+          in: path
+          required: true
+          description: The ID of the rental to retrieve
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+      responses:
+        '200':
+          description: Rental details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RentalResponse'
+        '404':
+          description: Rental not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          read-requests: 1
+
+  /calculate-discount:
+    post:
+      summary: Calculate discount
+      description: Calculate discount for given customer attributes using LLM
+      operationId: calculateDiscount
+      tags:
+        - Discounts
+      security:
+        - api_key: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscountRequest'
+            examples:
+              senior_disabled:
+                summary: Senior disabled customer
+                value:
+                  age: 70
+                  is_disabled: true
+                  medical_conditions: ["diabetes", "hypertension"]
+              child:
+                summary: Child customer
+                value:
+                  age: 8
+                  is_disabled: false
+                  medical_conditions: null
+              teenager:
+                summary: Teenager customer
+                value:
+                  age: 16
+                  is_disabled: false
+                  medical_conditions: null
+              adult_with_condition:
+                summary: Adult with medical condition
+                value:
+                  age: 35
+                  is_disabled: false
+                  medical_conditions: ["diabetes"]
+      responses:
+        '200':
+          description: Discount calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscountResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          discount-calculations: 5
+
+  /validate-discount:
+    post:
+      summary: Validate discount logic
+      description: Compare LLM and rule-based discount calculations for testing
+      operationId: validateDiscount
+      tags:
+        - Discounts
+      security:
+        - api_key: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscountRequest'
+      responses:
+        '200':
+          description: Discount validation results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  llm_result:
+                    $ref: '#/components/schemas/DiscountResponse'
+                  rule_result:
+                    $ref: '#/components/schemas/DiscountResponse'
+                  match:
+                    type: boolean
+                    description: Whether LLM and rule-based results match
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      x-google-quota:
+        metricCosts:
+          discount-calculations: 5
+
+components:
+  securitySchemes:
+    api_key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://accounts.google.com/o/oauth2/auth
+          tokenUrl: https://oauth2.googleapis.com/token
+          scopes:
+            read: Read access to resources
+            write: Write access to resources
+
+  schemas:
+    CustomerCreate:
+      type: object
+      required:
+        - name
+        - age
+        - contact_info
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Customer's full name
+          example: "John Doe"
+        age:
+          type: integer
+          minimum: 0
+          maximum: 120
+          description: Customer's age
+          example: 25
+        contact_info:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Customer's contact information
+          example: "john.doe@example.com"
+        is_disabled:
+          type: boolean
+          default: false
+          description: Whether the customer is disabled
+          example: false
+        medical_conditions:
+          type: array
+          items:
+            type: string
+            enum: ["diabetes", "hypertension", "chronic condition"]
+          nullable: true
+          description: List of medical conditions
+          example: ["diabetes"]
+
+    CustomerResponse:
+      allOf:
+        - $ref: '#/components/schemas/CustomerCreate'
+        - type: object
+          required:
+            - id
+            - created_at
+          properties:
+            id:
+              type: integer
+              description: Unique customer identifier
+              example: 1
+            created_at:
+              type: string
+              format: date-time
+              description: Customer creation timestamp
+              example: "2023-12-01T10:30:00Z"
+
+    RentalCreate:
+      type: object
+      required:
+        - customer_id
+        - shoe_size
+        - rental_fee
+      properties:
+        customer_id:
+          type: integer
+          minimum: 1
+          description: ID of the customer renting shoes
+          example: 1
+        shoe_size:
+          type: number
+          minimum: 1
+          maximum: 20
+          multipleOf: 0.5
+          description: Shoe size (US sizing, rounded to nearest 0.5)
+          example: 10.5
+        rental_fee:
+          type: number
+          minimum: 0.01
+          multipleOf: 0.01
+          description: Base rental fee before discount
+          example: 25.00
+
+    RentalResponse:
+      allOf:
+        - $ref: '#/components/schemas/RentalCreate'
+        - type: object
+          required:
+            - id
+            - rental_date
+            - discount
+            - total_fee
+          properties:
+            id:
+              type: integer
+              description: Unique rental identifier
+              example: 1
+            rental_date:
+              type: string
+              format: date-time
+              description: Rental creation timestamp
+              example: "2023-12-01T10:30:00Z"
+            discount:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: Discount applied (0.0 to 1.0)
+              example: 0.25
+            total_fee:
+              type: number
+              minimum: 0
+              multipleOf: 0.01
+              description: Final fee after discount
+              example: 18.75
+
+    DiscountRequest:
+      type: object
+      required:
+        - age
+        - is_disabled
+      properties:
+        age:
+          type: integer
+          minimum: 0
+          maximum: 120
+          description: Customer's age
+          example: 70
+        is_disabled:
+          type: boolean
+          description: Whether the customer is disabled
+          example: true
+        medical_conditions:
+          type: array
+          items:
+            type: string
+            enum: ["diabetes", "hypertension", "chronic condition"]
+          nullable: true
+          description: List of medical conditions
+          example: ["diabetes", "hypertension"]
+
+    DiscountResponse:
+      type: object
+      required:
+        - discount_percentage
+        - reason
+      properties:
+        discount_percentage:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Discount percentage (0.0 to 1.0)
+          example: 0.25
+        reason:
+          type: string
+          description: Explanation for the discount applied
+          example: "Disability discount (25%)"
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+      properties:
+        status:
+          type: string
+          enum: ["healthy", "unhealthy"]
+          description: Service health status
+          example: "healthy"
+        service:
+          type: string
+          description: Service name
+          example: "bowling-shoes-rental"
+        timestamp:
+          type: string
+          format: date-time
+          description: Health check timestamp
+          example: "2023-12-01T10:30:00Z"
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Error message
+          example: "Customer with ID 999 not found"
+        error_code:
+          type: string
+          nullable: true
+          description: Error code for client handling
+          example: "CUSTOMER_NOT_FOUND"
+
+  examples:
+    CustomerCreateExample:
+      summary: Example customer creation
+      value:
+        name: "Jane Smith"
+        age: 70
+        contact_info: "jane.smith@example.com"
+        is_disabled: true
+        medical_conditions: ["diabetes", "hypertension"]
+
+    RentalCreateExample:
+      summary: Example rental creation
+      value:
+        customer_id: 1
+        shoe_size: 8.5
+        rental_fee: 25.00
+
+    DiscountRequestExample:
+      summary: Example discount calculation
+      value:
+        age: 70
+        is_disabled: true
+        medical_conditions: ["diabetes", "hypertension"]
+
+# API Gateway specific extensions
+x-google-management:
+  metrics:
+    - name: "bowling-shoes-rental/request_count"
+      displayName: "Request Count"
+      valueType: INT64
+      metricKind: COUNTER
+    - name: "bowling-shoes-rental/request_latency"
+      displayName: "Request Latency"
+      valueType: DISTRIBUTION
+      metricKind: HISTOGRAM
+  quota:
+    limits:
+      - name: "ApiRequestsPerMinutePerProject"
+        metric: "bowling-shoes-rental/request_count"
+        unit: "1/min/{project}"
+        values:
+          STANDARD: 1000
+      - name: "DiscountCalculationsPerMinutePerProject"
+        metric: "bowling-shoes-rental/discount_calculations"
+        unit: "1/min/{project}"
+        values:
+          STANDARD: 100
+
+tags:
+  - name: System
+    description: System endpoints for health checks and service information
+  - name: Customers
+    description: Customer management operations
+  - name: Rentals
+    description: Rental management operations
+  - name: Discounts
+    description: Discount calculation and validation operations
+
+externalDocs:
+  description: Find more information about the Bowling Shoes Rental Service
+  url: https://github.com/your-repo/bowling-shoes-rental 
